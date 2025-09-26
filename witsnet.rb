@@ -1,4 +1,5 @@
 #!/usr/bin/env ruby
 
+ETHERTYPE = "B081"
 UDP_PORT = 45185
 TCP_PORT = 45185
