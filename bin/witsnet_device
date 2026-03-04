@@ -1,0 +1,20 @@
+#!/usr/bin/env ruby
+
+require "socket"
+
+require_relative "../lib/witsnet"
+
+socket = UDPSocket.new
+socket.bind("127.0.0.1", UDP_PORT)
+
+shutdown = proc do
+  socket.close unless socket.closed?
+  exit 0
+end
+
+Signal.trap("TERM", &shutdown)
+Signal.trap("INT", &shutdown)
+
+loop do
+  sleep 1
+end
