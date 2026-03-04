@@ -1,0 +1,24 @@
+#!/usr/bin/env ruby
+
+require "socket"
+
+require_relative "../lib/witsnet"
+
+device_host = ENV.fetch("WITSNET_DEVICE_HOST", "127.0.0.1")
+device_port = Integer(ENV.fetch("WITSNET_DEVICE_PORT", UDP_PORT))
+
+socket = UDPSocket.new
+socket.connect(device_host, device_port)
+socket.send("witsnet", 0)
+
+shutdown = proc do
+  socket.close unless socket.closed?
+  exit 0
+end
+
+Signal.trap("TERM", &shutdown)
+Signal.trap("INT", &shutdown)
+
+loop do
+  sleep 1
+end
