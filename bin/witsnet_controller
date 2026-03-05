@@ -1,15 +1,45 @@
 #!/usr/bin/env ruby
 
 require "socket"
+require "uri"
 
 require_relative "../lib/witsnet"
 
-device_host = ENV.fetch("WITSNET_DEVICE_HOST", "127.0.0.1")
-device_port = Integer(ENV.fetch("WITSNET_DEVICE_PORT", UDP_PORT))
+def parse_transport_uri(argument)
+  uri = URI.parse(argument)
+  scheme = uri.scheme
+  host = uri.host
 
-socket = UDPSocket.new
-socket.connect(device_host, device_port)
-socket.send("witsnet", 0)
+  unless %w[udp tcp].include?(scheme) && host && !host.empty?
+    raise URI::InvalidURIError, "invalid transport endpoint"
+  end
+
+  default_port = scheme == "udp" ? UDP_PORT : TCP_PORT
+  [scheme, host, uri.port || default_port]
+end
+
+default_host = ENV.fetch("WITSNET_DEVICE_HOST", "127.0.0.1")
+default_port = Integer(ENV.fetch("WITSNET_DEVICE_PORT", UDP_PORT))
+transport_arg = ARGV.fetch(0, "udp://#{default_host}:#{default_port}")
+
+begin
+  transport, device_host, device_port = parse_transport_uri(transport_arg)
+rescue URI::InvalidURIError
+  warn "Usage: #{File.basename(__FILE__)} <udp://DEVICE_IP[:PORT]|tcp://DEVICE_IP[:PORT]>"
+  exit 1
+end
+
+socket = if transport == "udp"
+  udp_socket = UDPSocket.new
+  udp_socket.connect(device_host, device_port)
+  udp_socket.send("witsnet", 0)
+  udp_socket
+else
+  tcp_socket = TCPSocket.new(device_host, device_port)
+  tcp_socket.write("witsnet")
+  tcp_socket.flush
+  tcp_socket
+end
 
 shutdown = proc do
   socket.close unless socket.closed?
