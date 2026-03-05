@@ -1,20 +1,60 @@
 #!/usr/bin/env ruby
 
 require "socket"
+require "uri"
 
 require_relative "../lib/witsnet"
 
-socket = UDPSocket.new
-socket.bind("127.0.0.1", UDP_PORT)
+def parse_transport_uri(argument)
+  uri = URI.parse(argument)
+  scheme = uri.scheme
+  host = uri.host
+
+  unless %w[udp tcp].include?(scheme) && host && !host.empty?
+    raise URI::InvalidURIError, "invalid transport endpoint"
+  end
+
+  default_port = scheme == "udp" ? UDP_PORT : TCP_PORT
+  [scheme, host, uri.port || default_port]
+end
+
+transport_arg = ARGV.fetch(0, "udp://127.0.0.1")
+
+begin
+  transport, bind_host, bind_port = parse_transport_uri(transport_arg)
+rescue URI::InvalidURIError
+  warn "Usage: #{File.basename(__FILE__)} <udp://BIND_IP[:PORT]|tcp://BIND_IP[:PORT]>"
+  exit 1
+end
+
+listener = if transport == "udp"
+  socket = UDPSocket.new
+  socket.bind(bind_host, bind_port)
+  socket
+else
+  TCPServer.new(bind_host, bind_port)
+end
 
 shutdown = proc do
-  socket.close unless socket.closed?
+  listener.close unless listener.closed?
   exit 0
 end
 
 Signal.trap("TERM", &shutdown)
 Signal.trap("INT", &shutdown)
 
-loop do
-  sleep 1
+if transport == "udp"
+  loop do
+    sleep 1
+  end
+else
+  loop do
+    connection = listener.accept_nonblock(exception: false)
+    if connection == :wait_readable
+      sleep 0.05
+      next
+    end
+
+    connection.close
+  end
 end
