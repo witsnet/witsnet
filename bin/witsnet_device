@@ -10,6 +10,10 @@ def parse_transport_uri(argument)
   scheme = uri.scheme
   host = uri.host
 
+  if scheme == "eth" && host && !host.empty?
+    return [scheme, host]
+  end
+
   unless %w[udp tcp].include?(scheme) && host && !host.empty?
     raise URI::InvalidURIError, "invalid transport endpoint"
   end
@@ -18,18 +22,42 @@ def parse_transport_uri(argument)
   [scheme, host, uri.port || default_port]
 end
 
+def packet_protocol(ethertype)
+  [ethertype.delete_prefix("0x").to_i(16)].pack("n").unpack1("S")
+end
+
+def interface_index(interface_name)
+  Integer(File.read("/sys/class/net/#{interface_name}/ifindex").strip)
+end
+
+def packet_sockaddr(interface_name:, ethertype:)
+  [
+    Socket::AF_PACKET,
+    ethertype.delete_prefix("0x").to_i(16),
+    interface_index(interface_name),
+    0,
+    0,
+    0,
+    "\x00".b * 8
+  ].pack("SniSCCa8")
+end
+
 transport_arg = ARGV.fetch(0, "udp://127.0.0.1")
 
 begin
   transport, bind_host, bind_port = parse_transport_uri(transport_arg)
 rescue URI::InvalidURIError
-  warn "Usage: #{File.basename(__FILE__)} <udp://BIND_IP[:PORT]|tcp://BIND_IP[:PORT]>"
+  warn "Usage: #{File.basename(__FILE__)} <udp://BIND_IP[:PORT]|tcp://BIND_IP[:PORT]|eth://INTERFACE>"
   exit 1
 end
 
 listener = if transport == "udp"
   socket = UDPSocket.new
   socket.bind(bind_host, bind_port)
+  socket
+elsif transport == "eth"
+  socket = Socket.new(Socket::AF_PACKET, Socket::SOCK_RAW, packet_protocol(ETHERTYPE))
+  socket.bind(packet_sockaddr(interface_name: bind_host, ethertype: ETHERTYPE))
   socket
 else
   TCPServer.new(bind_host, bind_port)
@@ -44,6 +72,10 @@ Signal.trap("TERM", &shutdown)
 Signal.trap("INT", &shutdown)
 
 if transport == "udp"
+  loop do
+    sleep 1
+  end
+elsif transport == "eth"
   loop do
     sleep 1
   end
