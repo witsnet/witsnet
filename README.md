@@ -18,7 +18,9 @@ Wired and Wireless Transport in Synchronized networks.
               | replies / process data           |
               |<---------------------------------+
 
-                   transport: UDP 45185
+                   transport: EtherType B081
+                              UDP port 45185
+                              TCP port 45185
 ```
 
 - `Controller`: initiates configuration, cyclic control exchanges, and request/command traffic.
