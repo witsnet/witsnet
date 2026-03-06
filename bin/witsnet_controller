@@ -10,12 +10,53 @@ def parse_transport_uri(argument)
   scheme = uri.scheme
   host = uri.host
 
+  if scheme == "eth" && host && !host.empty?
+    return [scheme, host]
+  end
+
   unless %w[udp tcp].include?(scheme) && host && !host.empty?
     raise URI::InvalidURIError, "invalid transport endpoint"
   end
 
   default_port = scheme == "udp" ? UDP_PORT : TCP_PORT
   [scheme, host, uri.port || default_port]
+end
+
+def packet_protocol(ethertype)
+  [ethertype.delete_prefix("0x").to_i(16)].pack("n").unpack1("S")
+end
+
+def interface_index(interface_name)
+  Integer(File.read("/sys/class/net/#{interface_name}/ifindex").strip)
+end
+
+def mac_address(interface_name)
+  File.read("/sys/class/net/#{interface_name}/address").strip
+end
+
+def mac_address_bytes(mac_address)
+  mac_address.split(":").map { |octet| octet.to_i(16) }.pack("C6")
+end
+
+def packet_sockaddr(interface_name:, ethertype:, mac_address: nil)
+  address = mac_address ? mac_address_bytes(mac_address) : +""
+
+  [
+    Socket::AF_PACKET,
+    ethertype.delete_prefix("0x").to_i(16),
+    interface_index(interface_name),
+    0,
+    0,
+    address.bytesize,
+    address.ljust(8, "\x00")
+  ].pack("SniSCCa8")
+end
+
+def ethernet_frame(interface_name:, ethertype:, payload:)
+  source_mac = mac_address_bytes(mac_address(interface_name))
+  destination_mac = "\xff".b * 6
+
+  [destination_mac, source_mac, ethertype.delete_prefix("0x").to_i(16), payload].pack("a6a6na*")
 end
 
 default_host = ENV.fetch("WITSNET_DEVICE_HOST", "127.0.0.1")
@@ -25,7 +66,7 @@ transport_arg = ARGV.fetch(0, "udp://#{default_host}:#{default_port}")
 begin
   transport, device_host, device_port = parse_transport_uri(transport_arg)
 rescue URI::InvalidURIError
-  warn "Usage: #{File.basename(__FILE__)} <udp://DEVICE_IP[:PORT]|tcp://DEVICE_IP[:PORT]>"
+  warn "Usage: #{File.basename(__FILE__)} <udp://DEVICE_IP[:PORT]|tcp://DEVICE_IP[:PORT]|eth://INTERFACE>"
   exit 1
 end
 
@@ -34,6 +75,19 @@ socket = if transport == "udp"
   udp_socket.connect(device_host, device_port)
   udp_socket.send("witsnet", 0)
   udp_socket
+elsif transport == "eth"
+  packet_socket = Socket.new(Socket::AF_PACKET, Socket::SOCK_RAW, packet_protocol(ETHERTYPE))
+  packet_socket.bind(packet_sockaddr(interface_name: device_host, ethertype: ETHERTYPE))
+  packet_socket.send(
+    ethernet_frame(interface_name: device_host, ethertype: ETHERTYPE, payload: "witsnet"),
+    0,
+    packet_sockaddr(
+      interface_name: device_host,
+      ethertype: ETHERTYPE,
+      mac_address: "ff:ff:ff:ff:ff:ff"
+    )
+  )
+  packet_socket
 else
   tcp_socket = TCPSocket.new(device_host, device_port)
   tcp_socket.write("witsnet")
